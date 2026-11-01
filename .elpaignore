@@ -1,0 +1,7 @@
+# Files excluded when building the package tarball (GNU ELPA conventions)
+# README.org is kept: elpa-admin uses it to generate readme.txt
+CLAUDE.md
+.gitignore
+.dir-locals.el
+.elpaignore
+test
