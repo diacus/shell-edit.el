@@ -1,0 +1,109 @@
+#+title: shell-edit
+#+author: Diacus Magnuz
+#+options: num:nil toc:nil
+#+startup: overview
+
+Edit a shell's command line in its own buffer.
+
+=shell-edit= is a single-file Emacs package that copies the pending
+command line of any supported shell into a fresh, plain Emacs buffer
+for editing --- mirroring, for every shell, what readline's
+=edit-and-execute-command= does inside bash.  When the edit is
+accepted, the text is placed back on the shell's prompt, ready to run
+with RET; nothing is ever executed by the package itself.
+
+* Usage
+
+Edit the shell's pending command line:
+
+#+begin_example
+  C-x C-e
+#+end_example
+
+In the edit buffer, then:
+
+| ~C-c C-c~ | accept the edit --- place it on the shell's prompt |
+| ~C-c C-k~ | discard the edit --- leave the prompt untouched    |
+
+The edit buffer opens in its own frame when Emacs is graphic, and in
+the default window display on TTY frames.  A plain =C-x k= -- any
+=kill-buffer=, in fact -- discards as well.
+
+Acceptance *never* runs the command.  The edited line simply rests on
+the prompt, exactly where the shell would have it before RET; pressing
+RET is what runs it.
+
+* Features
+
+- Works with the four ways Emacs runs shells, where the pending input
+  lives very differently:
+
+  - ~vterm~ :: the command line lives inside the pty, where
+       only readline can reach it; the editor reads it through
+       readline's cursor motion and puts the edit back by sending
+       readline keys.
+  - =M-x shell= / comint :: any comint REPL keeps the pending input
+       in the buffer, after =process-mark=; typed-ahead and
+       accumulated input come along with the edit.
+  - ~eshell~ :: the pending input is delimited by
+       =eshell-last-output-end=; the comint-like buffer edit.
+  - ~term~ :: char mode goes through the pty like vterm does,
+       and line mode edits the buffer directly --- the same command
+       covers both.
+
+- Automatic bindings: once a mode is loaded, =C-x C-e= is bound in its
+  mode map --- =vterm-mode-map=, =eshell-mode-map=,
+  =comint-mode-map=, =term-mode-map=.
+
+- No shell integration required: the vterm and term backends read the
+  shell's own cursor positions rather than detect the prompt, so any
+  readline or zle shell works, whatever its prompt looks like.
+
+- Safe by design: commands refuse with a =user-error= while the
+  shell isn't accepting input (say, a command is still running in
+  eshell); and when the shell process dies while the edit buffer is
+  open, the edit is quietly discarded with a message.
+
+- =term= char mode keeps its raw =C-x=: the prefix is rebuilt, not
+  shadowed --- =C-x C-e= opens the editor while every other raw =C-x=
+  chord keeps reaching the inferior's pty untouched.
+
+* Installation
+
+The package is a single file, targeting Emacs 27.1 or newer.  With
+=package-vc=, either from a config or on the fly:
+
+#+begin_src elisp
+  (package-vc-install '(shell-edit :url "https://github.com/diacus/shell-edit"))
+#+end_src
+
+Once the file is on =load-path=, loading it installs the automatic
+bindings; nothing else to configure.  The =with-eval-after-load= hooks
+inside mean the library can be put on the init file even before the
+shell packages are loaded.
+
+To bind a single command instead --- useful for setups that rebind
+=shell-edit='s chords, or for a global editor for every shell --- use
+=shell-edit=, which dispatches on the current buffer's mode:
+
+#+begin_src elisp
+  (global-set-key (kbd "C-x C-e") #'shell-edit)
+#+end_src
+
+* The commands
+
+Each backend's command has =read-line=, =put-back= and main command
+parts; the main commands are the user-facing ones:
+
+#+attr_html: :style font-size:0.95em
+| Command               | For                          | Bound in        |
+|-----------------------+------------------------------+-----------------|
+| =shell-edit-vterm=    | =vterm-mode=                 | =vterm-mode-map= |
+| =shell-edit-eshell=   | =eshell-mode=                | =eshell-mode-map= |
+| =shell-edit-comint=   | =comint-mode=, any REPL      | =comint-mode-map= |
+| =shell-edit-term=     | =term-mode=, char and line   | =term-mode-map=  |
+| =shell-edit=          | dispatches on the mode       | unbound          |
+
+* Copying
+
+GPL-3.0-or-later.  See [[file:LICENSE][LICENSE]].
