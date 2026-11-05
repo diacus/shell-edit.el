@@ -31,7 +31,8 @@
 ;; itself, between `process-mark' and the end of the buffer.  Wherever
 ;; it rests, `C-x C-e' hands it over to an Emacs buffer, mirroring
 ;; readline's `edit-and-execute-command'.  The edit lands in a fresh
-;; buffer -- in its own frame when Emacs is graphic -- where
+;; buffer, displayed as `shell-edit-display-style' says -- ordinary
+;; window rules by default, a dedicated frame as an option -- where
 ;;
 ;;   `C-c C-c'  accepts the edit: it is placed back on the shell's
 ;;              prompt, ready to run with RET -- nothing is executed;
@@ -76,7 +77,30 @@
   (defvar term-mode-map)
   (defvar term-raw-map))
 
+(defgroup shell-edit nil
+  "Edit a shell's command line in its own buffer."
+  :group 'processes)
+
 ;;;; Shared machinery
+
+(defcustom shell-edit-display-style 'window
+  "How the shell edit buffer is displayed.
+
+The value `window' displays it through `pop-to-buffer', with
+whatever the ordinary window-display rules decide.  The value
+`frame' shows it in a dedicated frame, deleted when the edit is
+done; on a text terminal, where no frame can be popped, the `frame'
+style falls back to the `window' display.  The value `auto' keeps
+the historical behavior: `frame' when Emacs is graphic, `window'
+otherwise.  Any other non-nil value is a function receiving the
+edit BUFFER, which should return the frame it created, or nil when
+BUFFER went to a window of the current frame."
+  :type '(choice
+          (const :tag "Window display rules" window)
+          (const :tag "Dedicated frame" frame)
+          (const :tag "Frame when graphic" auto)
+          (function :tag "Custom display function"))
+  :group 'shell-edit)
 
 (defvar shell-edit--counter 0
   "Counter to generate unique names for shell edit buffers.")
@@ -90,26 +114,42 @@
 (defvar-local shell-edit--put-back nil
   "Function of \(SOURCE-BUFFER TEXT\) placing TEXT on the shell prompt.")
 
-(defun shell-edit--display (buffer)
-  "Display BUFFER for editing.
+(defun shell-edit--display-in-window (buffer)
+  "Display BUFFER through the ordinary window-display rules.
+Always returns nil: no frame was created."
+  (pop-to-buffer buffer)
+  nil)
 
-Pop up a fresh frame when Emacs is graphic (the usual case when it
-runs as a daemon); on TTY frames fall back to the default window
-display.  Return the frame that was created, or nil when BUFFER
-went to a window of the current frame."
-  (if (display-graphic-p)
-      (let ((previous (selected-frame))
-            (window (display-buffer
-                     buffer
-                     '((display-buffer-pop-up-frame)
-                       (reusable-frames . nil)
-                       (dedicated . t)))))
-        (when (and (window-live-p window)
-                   (not (eq (window-frame window) previous)))
-          (select-frame-set-input-focus (window-frame window))
-          (window-frame window)))
-    (pop-to-buffer buffer)
-    nil))
+(defun shell-edit--display-in-frame (buffer)
+  "Pop up a fresh, dedicated frame displaying BUFFER.
+
+The usual case when Emacs runs as a daemon.  Return the frame
+that was created, or nil when BUFFER went to a window of the
+current frame."
+  (let ((previous (selected-frame))
+        (window (display-buffer
+                 buffer
+                 '((display-buffer-pop-up-frame)
+                   (reusable-frames . nil)
+                   (dedicated . t)))))
+    (when (and (window-live-p window)
+               (not (eq (window-frame window) previous)))
+      (select-frame-set-input-focus (window-frame window))
+      (window-frame window))))
+
+(defun shell-edit--display (buffer)
+  "Display BUFFER for editing, per `shell-edit-display-style'.
+The frame returned, when any, is deleted with the edit buffer.
+An unknown symbol value behaves like the `window' style, the
+most harmless guess the display can make."
+  (pcase shell-edit-display-style
+    ('window (shell-edit--display-in-window buffer))
+    ((pred functionp) (funcall shell-edit-display-style buffer))
+    ((or 'frame 'auto)
+     (if (display-graphic-p)
+         (shell-edit--display-in-frame buffer)
+       (shell-edit--display-in-window buffer)))
+    (_ (shell-edit--display-in-window buffer))))
 
 (defun shell-edit--close-frame ()
   "Delete the frame created for this edit buffer, if needed.
@@ -159,7 +199,7 @@ last word on that."
 (defun shell-edit--open (source line put-back)
   "Open a fresh buffer with LINE, the command line of the SOURCE shell.
 PUT-BACK receives (SOURCE TEXT) when the edit is accepted.  The
-buffer is shown in its own frame when Emacs is graphic, and there
+buffer is displayed as `shell-edit-display-style' says, and there
 \\<shell-edit-edit-map>\\[shell-edit-accept] places the edit back on the
 shell's prompt,
 while \\[shell-edit-abort] -- or plain `kill-buffer' -- discards it."
@@ -327,7 +367,7 @@ the prompt is left with exactly the edits, ready to run with RET."
   "Edit the shell's current command line in a fresh buffer.
 Mirrors readline's `edit-and-execute-command': the command line
 after the prompt of this vterm is copied into a temporary buffer,
-shown in a new frame when Emacs is graphic.  There,
+displayed as `shell-edit-display-style' says.  There,
 \\<shell-edit-edit-map>\\[shell-edit-accept] puts the edited text back on
 the prompt and \\[shell-edit-abort] discards it; nothing is
 executed."
@@ -413,7 +453,7 @@ left with exactly the edits, ready to run with RET."
 Like `shell-edit-vterm', mirroring readline's
 `edit-and-execute-command': the command line of this term -- char
 or line mode, whichever the buffer is in -- is copied into a
-temporary buffer, shown in a new frame when Emacs is graphic.
+temporary buffer, displayed as `shell-edit-display-style' says.
 There, \\<shell-edit-edit-map>\\[shell-edit-accept] puts the edited text back
 on the prompt and \\[shell-edit-abort] discards it; nothing is
 executed."

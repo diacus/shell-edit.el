@@ -196,6 +196,61 @@ Nothing reaches the put-back, and the edit buffer still dies."
   (should (eq (lookup-key shell-edit-edit-map (kbd "C-c C-k"))
               #'shell-edit-abort)))
 
+(ert-deftest shell-edit-test-display-style-window ()
+  "The `window' style, the default, displays per the ordinary rules.
+No frame is involved, and the buffer still ends up displayed."
+  (let* ((shell-edit-display-style 'window)
+         (source (generate-new-buffer " *se-test-source*"))
+         (edit (shell-edit--open source "echo hi" #'ignore)))
+    (unwind-protect
+        (with-current-buffer edit
+          (should (null shell-edit--frame))
+          (should (get-buffer-window edit)))
+      (kill-buffer edit)
+      (kill-buffer source))))
+
+(ert-deftest shell-edit-test-display-style-frame-falls-back-on-tty ()
+  "On a text terminal the `frame' style falls back to the window rules."
+  (skip-unless (not (display-graphic-p)))
+  (let* ((shell-edit-display-style 'frame)
+         (source (generate-new-buffer " *se-test-source*"))
+         (edit (shell-edit--open source "echo hi" #'ignore)))
+    (unwind-protect
+        (with-current-buffer edit
+          (should (null shell-edit--frame))
+          (should (get-buffer-window edit)))
+      (kill-buffer edit)
+      (kill-buffer source))))
+
+(ert-deftest shell-edit-test-display-style-auto-on-tty ()
+  "On a text terminal the `auto' style uses the window rules."
+  (skip-unless (not (display-graphic-p)))
+  (let* ((shell-edit-display-style 'auto)
+         (source (generate-new-buffer " *se-test-source*"))
+         (edit (shell-edit--open source "echo hi" #'ignore)))
+    (unwind-protect
+        (with-current-buffer edit
+          (should (null shell-edit--frame))
+          (should (get-buffer-window edit)))
+      (kill-buffer edit)
+      (kill-buffer source))))
+
+(ert-deftest shell-edit-test-display-style-function ()
+  "A function value of the style decides how the buffer is displayed.
+The edit buffer keeps what the function returned on
+`shell-edit--frame', whatever it happens to be."
+  (let* ((seen nil)
+         (shell-edit-display-style
+          (lambda (buffer) (setq seen buffer) 'my-fake-frame))
+         (source (generate-new-buffer " *se-test-source*"))
+         (edit (shell-edit--open source "echo hi" #'ignore)))
+    (unwind-protect
+        (with-current-buffer edit
+          (should (eq seen edit))
+          (should (eq shell-edit--frame 'my-fake-frame)))
+      (kill-buffer edit)
+      (kill-buffer source))))
+
 ;;;; Comint
 
 (ert-deftest shell-edit-test-comint-input-start ()
