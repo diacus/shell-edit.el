@@ -519,7 +519,8 @@ last event, which would strip the `C-x' off chords like `C-x'
 Dispatches on the buffer's mode among the supported shells: vterm,
 eshell, term and the comint modes.  Each backend binds itself in
 its shell's own mode map already; this is the one command for
-setups that would rather bind a single one."
+setups that would rather bind a single one.  Outside the
+supported shells, the command refuses with a `user-error'."
   (interactive)
   (cond ((derived-mode-p 'vterm-mode) (shell-edit-vterm))
         ((derived-mode-p 'eshell-mode) (shell-edit-eshell))
