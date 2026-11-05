@@ -174,17 +174,71 @@ Nothing reaches the put-back, and the edit buffer still dies."
     (should (buffer-live-p source))
     (kill-buffer source)))
 
-(ert-deftest shell-edit-test-close-frame-noop-when-frameless ()
-  "`shell-edit--close-frame' is a no-op without a frame of its own."
-  (skip-unless (not (display-graphic-p)))
-  (let* ((source (generate-new-buffer " *se-test-source*"))
-         (edit (shell-edit--open source "echo hi" #'ignore)))
+(ert-deftest shell-edit-test-close-display-noop-when-nowhere ()
+  "`shell-edit--close-display' is a no-op without anything to clean.
+The buffer here was never displayed and holds no frame, so the
+hook has no windows to quit and no frame to delete."
+  (let ((edit (generate-new-buffer " *se-test-edit-undisplayed*")))
+    (with-current-buffer edit
+      (should (null shell-edit--frame))
+      (shell-edit--close-display)
+      (should (buffer-live-p edit)))
+    (kill-buffer edit)))
+
+(ert-deftest shell-edit-test-close-display-quits-the-window ()
+  "A created editor window dies with the edit buffer, any exit path.
+Accepting through \\<shell-edit-edit-map>\\[shell-edit-accept],
+aborting through \\[shell-edit-abort], and a plain `kill-buffer'
+-- the way `C-x k' reaches it -- all leave no window behind
+showing the edit buffer, and the window count is back to what it
+was before the editor was displayed."
+  (let ((source (generate-new-buffer " *se-test-source*")))
+    (dolist (kill-with '("accept" "abort" "plain kill"))
+      (let* ((windows-before (window-list nil 'never))
+             (edit (shell-edit--open source "echo hi" #'ignore))
+             (kill-command
+              (pcase kill-with
+                (`"accept" #'shell-edit-accept)
+                (`"abort" #'shell-edit-abort)
+                (`"plain kill" (lambda () (kill-buffer))))))
+        (unwind-protect
+            (progn
+              (should (get-buffer-window edit t))
+              (should (equal (length (window-list nil 'never))
+                             (1+ (length windows-before))))
+              (with-current-buffer edit
+                (funcall kill-command))
+              (should-not (get-buffer-window edit t))
+              (should-not (buffer-live-p edit))
+              (should (equal (length (window-list nil 'never))
+                             (length windows-before))))
+          (se-test--kill edit)
+          (kill-buffer source))))))
+
+(ert-deftest shell-edit-test-close-display-restores-borrowed-window ()
+  "A borrowed editor window is restored rather than deleted.
+When the display only reused one of the shell's windows -- the
+way `display-buffer' behaves with `pop-up-windows' nil -- the
+window survives the quit and goes back to some other buffer."
+  (let* ((shell-edit-display-style 'window)
+         (pop-up-windows nil)
+         (source (generate-new-buffer " *se-test-source*"))
+         edit)
     (unwind-protect
-        (with-current-buffer edit
-          (should (null shell-edit--frame))
-          (shell-edit--close-frame)
-          (should (buffer-live-p edit)))
-      (kill-buffer edit)
+        (let ((baseline (length (window-list nil 'never))))
+          (setq edit (shell-edit--open source "echo hi" #'ignore))
+          ;; The display borrowed an existing window: the count did
+          ;; not grow, and the window holding the edit buffer is
+          ;; there.
+          (should (get-buffer-window edit t))
+          (should (equal (length (window-list nil 'never)) baseline))
+          (with-current-buffer edit
+            (shell-edit-abort))
+          ;; The window survives the quit: same count, no window
+          ;; showing the edit buffer anywhere.
+          (should (equal (length (window-list nil 'never)) baseline))
+          (should-not (get-buffer-window edit t)))
+      (se-test--kill edit)
       (kill-buffer source))))
 
 (ert-deftest shell-edit-test-edit-map-keys ()

@@ -151,14 +151,30 @@ most harmless guess the display can make."
        (shell-edit--display-in-window buffer)))
     (_ (shell-edit--display-in-window buffer))))
 
-(defun shell-edit--close-frame ()
-  "Delete the frame created for this edit buffer, if needed.
-Added to `kill-buffer-hook' by `shell-edit--open'."
-  (when (and (frame-live-p shell-edit--frame)
-             (memq (current-buffer)
-                   (mapcar #'window-buffer
-                           (window-list shell-edit--frame 'never))))
-    (delete-frame shell-edit--frame)))
+(defun shell-edit--close-display ()
+  "Quit the window and the frame displaying this edit buffer.
+
+Added to `kill-buffer-hook' by `shell-edit--open': the frame
+`shell-edit--display-in-frame' created, when any, is deleted as
+long as it still comes with the edit buffer, and every other
+window showing the buffer is quit -- deleted when it was created
+for the buffer, restored to its previous buffer when the display
+only borrowed it.  `quit-restore-window' kills the buffer when it
+quits it, so this hook re-enters `kill-buffer' once, with nothing
+left to quit."
+  (let ((frame (and shell-edit--frame
+                    (frame-live-p shell-edit--frame)
+                    shell-edit--frame)))
+    ;; The dedicated frame: delete it while its windows still show
+    ;; the edit buffer, before anything switches them away.
+    (when (and frame
+               (memq (current-buffer)
+                     (mapcar #'window-buffer (window-list frame 'never))))
+      (delete-frame frame))
+    ;; The remaining windows, the frame's own excluded.
+    (dolist (window (get-buffer-window-list (current-buffer) nil t))
+      (unless (and frame (eq (window-frame window) frame))
+        (quit-restore-window window 'kill)))))
 
 (defun shell-edit-accept ()
   "Place the edited line back on the shell prompt, without executing it.
@@ -211,7 +227,7 @@ while \\[shell-edit-abort] -- or plain `kill-buffer' -- discards it."
     (setq-local shell-edit--put-back put-back)
     (setq-local shell-edit--frame
                 (shell-edit--display (current-buffer)))
-    (add-hook 'kill-buffer-hook #'shell-edit--close-frame)
+    (add-hook 'kill-buffer-hook #'shell-edit--close-display)
     (insert line)
     (goto-char (point-max))
     (use-local-map shell-edit-edit-map)
