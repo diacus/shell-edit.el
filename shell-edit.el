@@ -58,6 +58,11 @@
 ;;; Code:
 
 (require 'comint)
+;; Core libraries with functions this file uses, autoloaded nowhere in
+;; 27.1 -- the oldest support target.  Both are preloaded in 28.1 and
+;; newer, where the requires are no-ops.
+(require 'subr-x)
+(require 'seq)
 
 ;; What the shells define in their own libraries; keeping the byte
 ;; compiler quiet about the free references, nothing is loaded.
