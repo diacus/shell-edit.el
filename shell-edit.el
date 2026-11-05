@@ -71,7 +71,6 @@
 (declare-function vterm-reset-cursor-point "vterm")
 (declare-function vterm--get-cursor-point "vterm")
 (declare-function vterm--get-end-of-line "vterm")
-(declare-function term-in-char-mode "term")
 (declare-function term-send-raw-string "term")
 (declare-function term-check-proc "term")
 (eval-when-compile
@@ -423,6 +422,14 @@ terminal wrapped it into."
           (unless (eobp) (forward-char))))
       (apply #'concat (nreverse chunks)))))
 
+(defun shell-edit--term-in-char-mode-p ()
+  "Return t when this term buffer is in char mode.
+The test of `term-in-char-mode', inlined here: that of term is a
+macro, invisible to this package's byte compiler -- the whole
+point of declaring, never requiring.  As a local function it
+compiles to the same shape everywhere, source and byte code both."
+  (eq (current-local-map) term-raw-map))
+
 (defun shell-edit-term-read-line ()
   "Return the shell's current command line in this term buffer.
 In char mode readline's `C-e' and `C-a' are sent first: `C-e'
@@ -433,7 +440,7 @@ integration or prompt detection.  In line mode nothing is sent to
 the pty: the pending input is the text between the process mark
 and the end of the buffer."
   (let ((proc (get-buffer-process (current-buffer))))
-    (if (term-in-char-mode)
+    (if (shell-edit--term-in-char-mode-p)
         (progn
           (term-send-raw-string "\C-e")
           (when proc (accept-process-output proc 0.5))
@@ -460,7 +467,7 @@ left with exactly the edits, ready to run with RET."
              (term-check-proc (current-buffer))))
       (message "shell edit: the shell is gone, discarding the edit")
     (with-current-buffer source
-      (if (term-in-char-mode)
+      (if (shell-edit--term-in-char-mode-p)
           (progn
             (term-send-raw-string "\C-a")
             (term-send-raw-string "\C-k")
