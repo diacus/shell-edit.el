@@ -3,10 +3,10 @@
 ;; Copyright (C) 2026 Diacus Magnuz
 
 ;; Author: Diacus Magnuz
-;; Version: 0.1.0
+;; Version: 0.1.1
 ;; Package-Requires: ((emacs "27.1"))
 ;; Keywords: processes, terminals, comint
-;; URL: https://github.com/diacus/shell-edit
+;; URL: https://github.com/diacus/shell-edit.el
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;; This program is free software: you can redistribute it and/or modify

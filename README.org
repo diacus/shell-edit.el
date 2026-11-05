@@ -78,7 +78,7 @@ The package is a single file, targeting Emacs 27.1 or newer.  With
 =package-vc=, either from a config or on the fly:
 
 #+begin_src elisp
-  (package-vc-install '(shell-edit :url "https://github.com/diacus/shell-edit"))
+  (package-vc-install '(shell-edit :url "https://github.com/diacus/shell-edit.el"))
 #+end_src
 
 Once the file is on =load-path=, loading it installs the automatic
