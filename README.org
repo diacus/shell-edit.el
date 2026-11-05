@@ -5,12 +5,12 @@
 
 Edit a shell's command line in its own buffer.
 
-=shell-edit= is a single-file Emacs package that copies the pending
-command line of any supported shell into a fresh, plain Emacs buffer
-for editing --- mirroring, for every shell, what readline's
-=edit-and-execute-command= does inside bash.  When the edit is
-accepted, the text is placed back on the shell's prompt, ready to run
-with RET; nothing is ever executed by the package itself.
+=shell-edit= is an Emacs package that copies the pending command line of
+any supported shell into a fresh, plain Emacs buffer for editing ---
+mirroring, for every shell, what readline's =edit-and-execute-command=
+does inside bash.  When the edit is accepted, the text is placed back
+on the shell's prompt, ready to run with RET; nothing is ever executed
+by the package itself.
 
 * Usage
 
@@ -25,9 +25,13 @@ In the edit buffer, then:
 | ~C-c C-c~ | accept the edit --- place it on the shell's prompt |
 | ~C-c C-k~ | discard the edit --- leave the prompt untouched    |
 
-The edit buffer opens in its own frame when Emacs is graphic, and in
-the default window display on TTY frames.  A plain =C-x k= -- any
-=kill-buffer=, in fact -- discards as well.
+How the edit buffer is displayed is up to =shell-edit-display-style=,
+adjustable through =M-x customize-variable RET shell-edit-display-style=.
+By default the ordinary window-display rules decide; a dedicated frame
+is an option, as is keeping the historical behavior of a frame on
+graphic displays.  A plain =C-x k= -- any =kill-buffer=, in fact --
+discards as well, returning borrowed windows to what they showed
+before.
 
 Acceptance *never* runs the command.  The edited line simply rests on
 the prompt, exactly where the shell would have it before RET; pressing
