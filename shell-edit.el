@@ -161,18 +161,24 @@ window showing the buffer is quit -- deleted when it was created
 for the buffer, restored to its previous buffer when the display
 only borrowed it.  `quit-restore-window' kills the buffer when it
 quits it, so this hook re-enters `kill-buffer' once, with nothing
-left to quit."
-  (let ((frame (and shell-edit--frame
-                    (frame-live-p shell-edit--frame)
-                    shell-edit--frame)))
+left to quit.
+
+Everything anchors on EDIT, the buffer captured at entry:
+`delete-frame' reselects the surviving frame's window, which
+switches the current buffer away from the edit buffer -- reading
+`current-buffer' after it would hand the quitting to the shell's
+own window, and the shell buffer would go down with the edit."
+  (let* ((edit (current-buffer))
+         (frame (and shell-edit--frame
+                     (frame-live-p shell-edit--frame)
+                     shell-edit--frame)))
     ;; The dedicated frame: delete it while its windows still show
     ;; the edit buffer, before anything switches them away.
     (when (and frame
-               (memq (current-buffer)
-                     (mapcar #'window-buffer (window-list frame 'never))))
+               (memq edit (mapcar #'window-buffer (window-list frame 'never))))
       (delete-frame frame))
     ;; The remaining windows, the frame's own excluded.
-    (dolist (window (get-buffer-window-list (current-buffer) nil t))
+    (dolist (window (get-buffer-window-list edit nil t))
       (unless (and frame (eq (window-frame window) frame))
         (quit-restore-window window 'kill)))))
 
