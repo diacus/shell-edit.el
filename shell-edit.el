@@ -52,6 +52,14 @@
 ;; shadowed: `C-x C-e' opens the editor while every other raw `C-x'
 ;; chord keeps reaching the inferior's pty untouched.
 ;;
+;; The pty backends run against their terminal's redraw: when it has
+;; not caught up by the time a read lands, the editor sees a too
+;; short line, and the put-back's `C-a' `C-k' wipes what the shell
+;; actually held.  Nothing about the pty's state is detected either,
+;; so the readline keys of a put-back go wherever the terminal's
+;; focus is, into a still running command included.  Both are rare
+;; and inherent: no prompt detection exists for the pty backends.
+;;
 ;; `shell-edit' dispatches on the current buffer's mode, for shells
 ;; and setups that would rather bind one command.
 
@@ -187,9 +195,13 @@ own window, and the shell buffer would go down with the edit."
     (when (and frame
                (memq edit (mapcar #'window-buffer (window-list frame 'never))))
       (delete-frame frame))
-    ;; The remaining windows, the frame's own excluded.
+    ;; The remaining windows, the frame's own excluded.  The list
+    ;; was taken before the quitting, and a quit may take a frame
+    ;; with it, carrying some of the rest: check liveness in every
+    ;; iteration too.
     (dolist (window (get-buffer-window-list edit nil t))
-      (unless (and frame (eq (window-frame window) frame))
+      (when (and (window-live-p window)
+                 (not (and frame (eq (window-frame window) frame))))
         (quit-restore-window window 'kill)))))
 
 (defun shell-edit-accept ()
@@ -337,17 +349,22 @@ whenever command input is pending."
   "Place TEXT on the eshell prompt of SOURCE, without executing it.
 The shell's pending input is deleted from the prompt onwards, so
 the prompt is left with exactly the edits, ready to run with RET.
-When the shell is no longer prompting (a command started
-meanwhile), nothing is written and the edit is discarded."
+Stock eshell buffers are writable, but a read-only eshell -- user
+hooks, scroll-protecting packages -- must not stand between the
+edit and the prompt; `inhibit-read-only' is what the comint and
+the term line-mode put-backs already do.  When the shell is no
+longer prompting (a command started meanwhile), nothing is
+written and the edit is discarded."
   (if (not (with-current-buffer source
              (shell-edit--eshell-prompting-p)))
       (message "shell edit: the shell is gone, discarding the edit")
     (with-current-buffer source
-      (goto-char (point-max))
-      (delete-region eshell-last-output-end (point-max))
-      (when (> (length text) 0)
-        (insert text))
-      (goto-char (point-max)))))
+      (let ((inhibit-read-only t))
+        (goto-char (point-max))
+        (delete-region eshell-last-output-end (point-max))
+        (when (> (length text) 0)
+          (insert text))
+        (goto-char (point-max))))))
 
 (defun shell-edit-eshell ()
   "Edit the current eshell command line in a fresh buffer.
@@ -514,11 +531,22 @@ The `C-x' chords of `term-raw-map' that
 `shell-edit--term-raw-ctl-x-map' does not rebind fall back on this
 one: `term-send-raw' cannot serve there, because it sends only the
 last event, which would strip the `C-x' off chords like `C-x'
-`C-s'."
+`C-s'.  Character events travel as their raw bytes; a vector
+event, which has no byte of its own, travels the way plain char
+mode sends it: through its own `term-raw-map' binding, which
+carries the byte sequence of this key on this terminal -- plain
+char mode knows nothing of chords, and neither shall this."
   (interactive)
   (let ((keys (this-command-keys)))
-    (when (seq-every-p #'characterp keys)
-      (term-send-raw-string keys))))
+    (if (seq-every-p #'characterp keys)
+        (term-send-raw-string keys)
+      ;; A vector event somewhere in the chord: byte by byte, then.
+      (dolist (event keys)
+        (if (characterp event)
+            (term-send-raw-string (char-to-string event))
+          (let ((binding (lookup-key term-raw-map (vector event))))
+            (when (commandp binding)
+              (call-interactively binding))))))))
 
 (defvar shell-edit--term-raw-ctl-x-map
   (let ((map (make-sparse-keymap)))
