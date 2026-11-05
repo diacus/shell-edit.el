@@ -237,7 +237,7 @@ while \\[shell-edit-abort] -- or plain `kill-buffer' -- discards it."
     (setq-local shell-edit--put-back put-back)
     (setq-local shell-edit--frame
                 (shell-edit--display (current-buffer)))
-    (add-hook 'kill-buffer-hook #'shell-edit--close-display)
+    (add-hook 'kill-buffer-hook #'shell-edit--close-display nil t)
     (insert line)
     (goto-char (point-max))
     (use-local-map shell-edit-edit-map)
