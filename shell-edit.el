@@ -196,6 +196,8 @@ stale point, and the put-back -- which leaves the shell's point at
 the end of its pending input, where RET sends it -- must have the
 last word on that."
   (interactive)
+  (unless (and (bufferp shell-edit--source) shell-edit--put-back)
+    (user-error "Not a shell edit buffer"))
   (let* ((source shell-edit--source)
          (put-back shell-edit--put-back)
          (text (string-trim-right
@@ -211,6 +213,8 @@ last word on that."
 (defun shell-edit-abort ()
   "Leave the shell prompt untouched and discard the edit buffer."
   (interactive)
+  (unless (and (bufferp shell-edit--source) shell-edit--put-back)
+    (user-error "Not a shell edit buffer"))
   (kill-buffer (current-buffer)))
 
 (defconst shell-edit-edit-map

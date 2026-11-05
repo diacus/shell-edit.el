@@ -162,6 +162,20 @@ Nothing reaches the put-back, and the edit buffer still dies."
     (should (eq seen 'no-call))
     (should-not (buffer-live-p edit))))
 
+(ert-deftest shell-edit-test-accept-and-abort-refuse-outside ()
+  "The accept and abort commands refuse outside an edit buffer.
+Both are plain interactive commands, reachable with `M-x' in any
+buffer: without the contract buffer-locals they must refuse with a
+`user-error' rather than take the current buffer down with them."
+  (let ((victim (generate-new-buffer " *se-test-victim*")))
+    (unwind-protect
+        (with-current-buffer victim
+          (should-error (shell-edit-accept) :type 'user-error)
+          (should-error (shell-edit-abort) :type 'user-error)
+          ;; The refusals left the buffer untouched.
+          (should (buffer-live-p victim)))
+      (kill-buffer victim))))
+
 (ert-deftest shell-edit-test-abort-kills-the-edit ()
   "`shell-edit-abort' kills the edit buffer, the source untouched."
   (let* ((source (generate-new-buffer " *se-test-source*"))
