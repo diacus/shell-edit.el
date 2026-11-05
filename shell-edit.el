@@ -129,15 +129,21 @@ Always returns nil: no frame was created."
 
 The usual case when Emacs runs as a daemon.  Return the frame
 that was created, or nil when BUFFER went to a window of the
-current frame."
+current frame.  The frame is vouched for by difference: whatever
+`display-buffer' handed back, only a frame of which there was no
+trace before the display is one the display created -- a failed
+`display-buffer-pop-up-frame' falls back on other windows, on
+frames of this editor's own making and of nobody else's."
   (let ((previous (selected-frame))
+        (existing (frame-list))
         (window (display-buffer
                  buffer
                  '((display-buffer-pop-up-frame)
                    (reusable-frames . nil)
                    (dedicated . t)))))
     (when (and (window-live-p window)
-               (not (eq (window-frame window) previous)))
+               (not (eq (window-frame window) previous))
+               (not (memq (window-frame window) existing)))
       (select-frame-set-input-focus (window-frame window))
       (window-frame window))))
 
