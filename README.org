@@ -39,13 +39,19 @@ RET is what runs it.
 
 * Features
 
-- Works with the four ways Emacs runs shells, where the pending input
+- Works with the five ways Emacs runs shells, where the pending input
   lives very differently:
 
   - ~vterm~ :: the command line lives inside the pty, where
        only readline can reach it; the editor reads it through
        readline's cursor motion and puts the edit back by sending
        readline keys.
+  - ~ghostel~ :: the pty route again: the editor reads by cursor
+       motion and puts the edit back as a bracketed paste ---
+       literal text, multi-line edits and control characters
+       included.  Semi-char and char mode are covered; in char
+       mode the raw =C-x= prefix is rebuilt rather than shadowed,
+       exactly as =term= does.
   - =M-x shell= / comint :: any comint REPL keeps the pending input
        in the buffer, after =process-mark=; typed-ahead and
        accumulated input come along with the edit.
@@ -56,12 +62,12 @@ RET is what runs it.
        covers both.
 
 - Automatic bindings: once a mode is loaded, =C-x C-e= is bound in its
-  mode map --- =vterm-mode-map=, =eshell-mode-map=,
-  =comint-mode-map=, =term-mode-map=.
+  mode map --- =vterm-mode-map=, =ghostel-mode-map=,
+  =eshell-mode-map=, =comint-mode-map=, =term-mode-map=.
 
-- No shell integration required: the vterm and term backends read the
-  shell's own cursor positions rather than detect the prompt, so any
-  readline or zle shell works, whatever its prompt looks like.
+- No shell integration required: the vterm, ghostel and term backends
+  read the shell's own cursor positions rather than detect the prompt,
+  so any readline or zle shell works, whatever its prompt looks like.
 
 - Safe by design: commands refuse with a =user-error= while the
   shell isn't accepting input (say, a command is still running in
@@ -103,6 +109,8 @@ parts; the main commands are the user-facing ones:
 | Command               | For                          | Bound in        |
 |-----------------------+------------------------------+-----------------|
 | =shell-edit-vterm=    | =vterm-mode=                 | =vterm-mode-map= |
+| =shell-edit-ghostel=  | =ghostel-mode=, semi-char    | =ghostel-mode-map= |
+|                       | and char mode                |                 |
 | =shell-edit-eshell=   | =eshell-mode=                | =eshell-mode-map= |
 | =shell-edit-comint=   | =comint-mode=, any REPL      | =comint-mode-map= |
 | =shell-edit-term=     | =term-mode=, char and line   | =term-mode-map=  |

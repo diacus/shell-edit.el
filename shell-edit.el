@@ -3,7 +3,7 @@
 ;; Copyright (C) 2026 Diacus Magnuz
 
 ;; Author: Diacus Magnuz
-;; Version: 0.1.1
+;; Version: 0.2.0
 ;; Package-Requires: ((emacs "27.1"))
 ;; Keywords: processes, terminals, comint
 ;; URL: https://github.com/diacus/shell-edit.el
@@ -25,10 +25,10 @@
 ;;; Commentary:
 
 ;; The shells keep their unfinished command line in different places:
-;; vterm and a char-mode term carry it inside the pty, where only
-;; readline -- or zle -- can reach it; eshell and the comint buffers
-;; (M-x shell, and any other comint REPL) keep it in the buffer
-;; itself, between `process-mark' and the end of the buffer.  Wherever
+;; vterm, a char-mode term and ghostel carry it inside the pty, where
+;; only readline -- or zle -- can reach it; eshell and the comint
+;; buffers (M-x shell, and any other comint REPL) keep it in the
+;; buffer itself, between `process-mark' and the end of the buffer.  Wherever
 ;; it rests, `C-x C-e' hands it over to an Emacs buffer, mirroring
 ;; readline's `edit-and-execute-command'.  The edit lands in a fresh
 ;; buffer, displayed as `shell-edit-display-style' says -- ordinary
@@ -44,9 +44,18 @@
 ;; shell's mode map as `C-x C-e' once the mode is loaded:
 ;;
 ;;   `shell-edit-vterm'    vterm-mode, through the pty;
+;;   `shell-edit-ghostel'  ghostel-mode, through the pty;
 ;;   `shell-edit-eshell'   eshell-mode, in the buffer;
 ;;   `shell-edit-comint'   comint-mode, in the buffer (any REPL);
 ;;   `shell-edit-term'     term-mode, char and line mode both.
+;;
+;; The ghostel backend reads the way a char-mode term does -- the two
+;; cursor positions bracket the logical line -- and the edit travels
+;; back as a bracketed paste, literal through the newlines and the
+;; control characters whenever the shell's mode 2004 is on.  Ghostel's
+;; char mode captures every key, so its `C-x' prefix is rebuilt, not
+;; shadowed: `C-x C-e' opens the editor while every other raw `C-x'
+;; chord keeps reaching the shell's pty untouched.
 ;;
 ;; In a term buffer's char mode the plain `C-x' prefix is rebuilt, not
 ;; shadowed: `C-x C-e' opens the editor while every other raw `C-x'
@@ -74,6 +83,10 @@
 
 ;; What the shells define in their own libraries; keeping the byte
 ;; compiler quiet about the free references, nothing is loaded.
+(declare-function ghostel-send-key "ghostel")
+(declare-function ghostel-send-string "ghostel")
+(declare-function ghostel-paste-string "ghostel")
+(declare-function ghostel-cursor-point "ghostel")
 (declare-function vterm-send-key "vterm")
 (declare-function vterm-insert "vterm")
 (declare-function vterm-reset-cursor-point "vterm")
@@ -82,6 +95,10 @@
 (declare-function term-send-raw-string "term")
 (declare-function term-check-proc "term")
 (eval-when-compile
+  (defvar ghostel--input-mode)
+  (defvar ghostel--process)
+  (defvar ghostel-mode-map)
+  (defvar ghostel-char-mode-map)
   (defvar vterm--process)
   (defvar eshell-last-output-end)
   (defvar eshell-mode-map)
@@ -562,17 +579,122 @@ char mode knows nothing of chords, and neither shall this."
 ;; editor's char mode reads the screen -- the C-l redraw in the
 ;; put-back is what keeps the two in sync.
 
+;;;; Ghostel
+
+(defun shell-edit-ghostel-read-line ()
+  "Return the shell's current command line in this ghostel buffer.
+Readline's `C-e' parks the terminal cursor at the end of the
+logical line and `C-a' at its start; the command line is the
+screen text between the two cursor positions, joined across the
+lines the terminal wrapped it into, without depending on any shell
+integration or prompt detection.  The side effect is that the
+shell's cursor is left at the start of its input line."
+  (ghostel-send-key "e" "ctrl") ; C-e: readline, end of input
+  (when (and (bound-and-true-p ghostel--process)
+             (process-live-p ghostel--process))
+    (accept-process-output ghostel--process 0.5))
+  ;; The renderer paints only during redisplay, coalescing redraws on
+  ;; its own timer whenever they miss the immediate window that
+  ;; follows a send -- `accept-process-output' alone runs none of
+  ;; that, so the cursor position of the wait may never land.  The
+  ;; explicit redisplay flushes the render's `pre-redisplay' hook now.
+  (when (display-graphic-p)
+    (redisplay))
+  (let ((end (ghostel-cursor-point)))
+    (unless (integer-or-marker-p end)
+      (user-error "No cursor position in this ghostel buffer"))
+    (ghostel-send-key "a" "ctrl") ; C-a: readline, start of input
+    (when (and (bound-and-true-p ghostel--process)
+               (process-live-p ghostel--process))
+      (accept-process-output ghostel--process 0.5))
+    (when (display-graphic-p)
+      (redisplay))
+    (let ((beg (ghostel-cursor-point)))
+      (unless (integer-or-marker-p beg)
+        (user-error "No cursor position in this ghostel buffer"))
+      (shell-edit--term-read-between (min beg end) (max beg end)))))
+
+(defun shell-edit-ghostel-put-back (source text)
+  "Place TEXT on the ghostel prompt of SOURCE, without executing it.
+Readline's `C-a' `C-k' discards the shell's current input first --
+the prompt ends up holding exactly the edits.  TEXT then travels
+as a bracketed paste: literal characters, the newlines and the
+control characters included, whenever the inner program has
+readline and zle's mode 2004 enabled, a plain send otherwise.
+Nothing is executed; the user's own RET runs the line."
+  (if (not (with-current-buffer source
+             (and (bound-and-true-p ghostel--process)
+                  (process-live-p ghostel--process))))
+      (message "shell edit: the shell is gone, discarding the edit")
+    (with-current-buffer source
+      (ghostel-send-key "a" "ctrl") ; C-a: readline, start of input
+      (ghostel-send-key "k" "ctrl") ; C-k: readline, kill to end
+      (when (> (length text) 0)
+        (ghostel-paste-string text)))))
+
+(defun shell-edit-ghostel ()
+  "Edit the shell's current command line in a fresh buffer.
+Like `shell-edit-vterm', mirroring readline's
+`edit-and-execute-command': the command line after the prompt of
+this `ghostel-mode' buffer is copied into a temporary buffer,
+displayed as `shell-edit-display-style' says.  There,
+\\<shell-edit-edit-map>\\[shell-edit-accept] puts the edited text back on
+the prompt and \\[shell-edit-abort] discards it; nothing is
+executed.  The command refuses with a `user-error' out of the
+`copy', `emacs' and `line' modes, where the pending input is not
+the shell's line, and out of a buffer whose shell is not live."
+  (interactive)
+  (unless (and (memq ghostel--input-mode '(semi-char char))
+               (bound-and-true-p ghostel--process)
+               (process-live-p ghostel--process))
+    (user-error "No running shell in this ghostel buffer"))
+  (shell-edit--open (current-buffer)
+                    (shell-edit-ghostel-read-line)
+                    #'shell-edit-ghostel-put-back))
+
+(defun shell-edit--ghostel-raw-keys ()
+  "Send the `C-x' chord's whole key sequence to the shell's pty.
+The `C-x' chords of `ghostel-char-mode-map' that
+`shell-edit--ghostel-raw-ctl-x-map' does not rebind fall back on
+this one, the way the term backend's raw map does.  Character
+events travel as their raw bytes; a vector event, which has no
+byte of its own, travels the way char mode itself sends it:
+through its own `ghostel-char-mode-map' binding, which routes the
+event through the key encoder -- plain char mode knows nothing of
+chords, and neither shall this."
+  (interactive)
+  (let ((keys (this-command-keys)))
+    (if (seq-every-p #'characterp keys)
+        (ghostel-send-string keys)
+      ;; A vector event somewhere in the chord: byte by byte, then.
+      (dolist (event keys)
+        (if (characterp event)
+            (ghostel-send-string (char-to-string event))
+          (let ((binding (lookup-key ghostel-char-mode-map (vector event))))
+            (when (commandp binding)
+              (call-interactively binding))))))))
+
+(defvar shell-edit--ghostel-raw-ctl-x-map
+  (let ((map (make-sparse-keymap)))
+    ;; The editor is the one chord the editor itself rebinds; every
+    ;; other C-x chord keeps reaching the inferior's pty through the
+    ;; default binding above, so the raw C-x semantics survive.
+    (define-key map "\C-e" #'shell-edit-ghostel)
+    (define-key map [t] #'shell-edit--ghostel-raw-keys)
+    map))
+
 ;;;; Dispatch
 
 (defun shell-edit ()
   "Edit the current shell's command line in a fresh buffer.
 Dispatches on the buffer's mode among the supported shells: vterm,
-eshell, term and the comint modes.  Each backend binds itself in
-its shell's own mode map already; this is the one command for
-setups that would rather bind a single one.  Outside the
-supported shells, the command refuses with a `user-error'."
+ghostel, eshell, term and the comint modes.  Each backend binds
+itself in its shell's own mode map already; this is the one
+command for setups that would rather bind a single one.  Outside
+the supported shells, the command refuses with a `user-error'."
   (interactive)
   (cond ((derived-mode-p 'vterm-mode) (shell-edit-vterm))
+        ((derived-mode-p 'ghostel-mode) (shell-edit-ghostel))
         ((derived-mode-p 'eshell-mode) (shell-edit-eshell))
         ((derived-mode-p 'term-mode) (shell-edit-term))
         ((derived-mode-p 'comint-mode) (shell-edit-comint))
@@ -598,6 +720,19 @@ supported shells, the command refuses with a `user-error'."
   ;; prefix is rebuilt here instead of shadowed wholesale: a plain
   ;; C-x C-e binding would leave every other C-x chord undefined.
   (define-key term-raw-map "\C-x" shell-edit--term-raw-ctl-x-map))
+
+;; The binding lives on the base map, on purpose: the input maps are
+;; swapped -- ghostel's semi-char keymap is rebuilt at runtime in
+;; place, line mode's is re-parented -- and would not keep a
+;; load-time binding.  Char mode is the exception that captures
+;; everything, C-c included, with no parent to inherit this one from,
+;; so there the C-x prefix is rebuilt instead, term's raw map style:
+;; the editor on one chord, and every other C-x chord forwarded to
+;; the shell's pty by its `[t]' fallback.
+(with-eval-after-load 'ghostel
+  (define-key ghostel-mode-map (kbd "C-x C-e") #'shell-edit-ghostel)
+  (define-key ghostel-char-mode-map "\C-x"
+              shell-edit--ghostel-raw-ctl-x-map))
 
 (provide 'shell-edit)
 ;;; shell-edit.el ends here
